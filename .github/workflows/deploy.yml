@@ -9,34 +9,35 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v2
     
     - name: Set up Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v2
       with:
         node-version: '16'
-        cache: 'npm'
         
-    - name: Cache Dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          **/node_modules
-          ~/.npm
-        key: ${{ runner.os }}-modules-${{ hashFiles('**/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-modules-
-
-    - name: Install and Build Frontend
+    - name: Install Frontend Dependencies
       working-directory: frontend
       run: |
-        npm ci --prefer-offline --no-audit
+        npm ci
         echo "REACT_APP_API_URL=http://${{ secrets.EC2_PUBLIC_IP }}/api" > .env
-        npm run build --if-present
+        
+    - name: Build Frontend
+      working-directory: frontend
+      run: |
+        npm install react-scripts --save-dev
+        npx react-scripts build
         
     - name: Install Backend Dependencies
       working-directory: backend
-      run: npm ci --prefer-offline --no-audit
+      run: npm ci
+        
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
         
     - name: Deploy to EC2
       env:
@@ -44,31 +45,46 @@ jobs:
         HOST: ${{ secrets.EC2_PUBLIC_IP }}
         USER: ec2-user
       run: |
-        # Setup SSH
-        echo "$PRIVATE_KEY" > deploy-key.pem
+        # Save private key from secrets with error checking
+        if [[ -z "$PRIVATE_KEY" ]]; then
+          echo "Error: PRIVATE_KEY is empty"
+          exit 1
+        fi
+        
+        # Try direct write first (if key is not base64 encoded)
+        echo "$PRIVATE_KEY" > deploy-key.pem || {
+          # If direct write fails, try base64 decode
+          echo "$PRIVATE_KEY" | base64 -d -i > deploy-key.pem || {
+            echo "Error: Failed to decode private key"
+            exit 1
+          }
+        }
+        
+        # Verify the key file exists and has content
+        if [[ ! -s deploy-key.pem ]]; then
+          echo "Error: deploy-key.pem is empty or does not exist"
+          exit 1
+        fi
+        
         chmod 600 deploy-key.pem
         
-        # Optimize SSH connections
-        cat >> ~/.ssh/config << EOL
-        Host ec2
-          HostName $HOST
-          User $USER
-          IdentityFile $PWD/deploy-key.pem
-          StrictHostKeyChecking no
-          UserKnownHostsFile /dev/null
-        EOL
+        # Test SSH connection
+        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'echo "SSH connection successful"'
         
-        # Create directories and prepare for deployment
-        ssh ec2 'mkdir -p ~/app/{frontend/build,backend}'
+        # Create deployment directory structure
+        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} '
+          mkdir -p ~/app/frontend/build
+          mkdir -p ~/app/backend
+        '
         
-        # Parallel file transfer using tar for compression
-        (tar czf - -C frontend/build/ .) | ssh ec2 'cd ~/app/frontend/build && tar xzf -' &
-        (tar czf - -C backend/ .) | ssh ec2 'cd ~/app/backend && tar xzf -' &
-        wait
+        # Copy frontend build
+        scp -i deploy-key.pem -o StrictHostKeyChecking=no -r frontend/build/* ${USER}@${HOST}:~/app/frontend/build/
         
-        # Configure and deploy
-        ssh ec2 "
-          # Update backend environment
+        # Copy backend files
+        scp -i deploy-key.pem -o StrictHostKeyChecking=no -r backend/* ${USER}@${HOST}:~/app/backend/
+        
+        # Create backend .env file
+        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} "
           cat > ~/app/backend/.env << 'EOL'
           PORT=5000
           DB_HOST=${{ secrets.DB_HOST }}
@@ -78,68 +94,59 @@ jobs:
           DB_PORT=3306
           CORS_ORIGIN=http://${{ secrets.EC2_PUBLIC_IP }}
           EOL
-
-          # Install or update dependencies
+        "
+        
+        # Install dependencies and start services
+        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} '
+          # Install Node.js if not installed
           if ! command -v node &> /dev/null; then
             curl -fsSL https://rpm.nodesource.com/setup_16.x | sudo bash -
             sudo yum install -y nodejs
           fi
           
+          # Install PM2 if not installed
           if ! command -v pm2 &> /dev/null; then
             sudo npm install -g pm2
           fi
           
-          if ! command -v nginx &> /dev/null; then
-            sudo amazon-linux-extras install -y nginx1
-          fi
-          
-          # Update backend and restart service
           cd ~/app/backend
-          npm ci --prefer-offline --no-audit --production
-          pm2 delete backend 2>/dev/null || true
+          npm ci --production
+          pm2 delete backend || true
           pm2 start server.js --name backend
           
-          # Configure Nginx with optimizations
-          sudo tee /etc/nginx/nginx.conf << 'EOL'
+          # Configure Nginx
+          if ! command -v nginx &> /dev/null; then
+            sudo yum install -y nginx
+          fi
+          
+          sudo tee /etc/nginx/nginx.conf << EOL
           user nginx;
           worker_processes auto;
-          worker_rlimit_nofile 65535;
-          error_log /var/log/nginx/error.log warn;
+          error_log /var/log/nginx/error.log;
           pid /run/nginx.pid;
 
+          include /usr/share/nginx/modules/*.conf;
+
           events {
-              worker_connections 2048;
-              multi_accept on;
-              use epoll;
+              worker_connections 1024;
           }
 
           http {
-              include             /etc/nginx/mime.types;
-              default_type        application/octet-stream;
-              
-              # Optimization settings
+              log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                              '\$status \$body_bytes_sent "\$http_referer" '
+                              '"\$http_user_agent" "\$http_x_forwarded_for"';
+
+              access_log  /var/log/nginx/access.log  main;
+
               sendfile            on;
               tcp_nopush          on;
               tcp_nodelay         on;
               keepalive_timeout   65;
-              types_hash_max_size 2048;
-              
-              # Compression
-              gzip               on;
-              gzip_vary          on;
-              gzip_proxied       any;
-              gzip_comp_level    6;
-              gzip_buffers       16 8k;
-              gzip_http_version  1.1;
-              gzip_min_length    256;
-              gzip_types         text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript application/vnd.ms-fontobject application/x-font-ttf font/opentype image/svg+xml image/x-icon;
-              
-              # File handle caching
-              open_file_cache max=1000 inactive=20s;
-              open_file_cache_valid 30s;
-              open_file_cache_min_uses 2;
-              open_file_cache_errors on;
-              
+              types_hash_max_size 4096;
+
+              include             /etc/nginx/mime.types;
+              default_type        application/octet-stream;
+
               server {
                   listen       80;
                   server_name  _;
@@ -147,44 +154,28 @@ jobs:
 
                   location / {
                       try_files \$uri \$uri/ /index.html;
-                      expires -1;
-                      add_header Cache-Control 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0';
+                      add_header Cache-Control "no-cache, no-store, must-revalidate";
                   }
 
                   location /api/ {
                       proxy_pass http://localhost:5000/;
                       proxy_http_version 1.1;
                       proxy_set_header Upgrade \$http_upgrade;
-                      proxy_set_header Connection 'upgrade';
+                      proxy_set_header Connection "upgrade";
                       proxy_set_header Host \$host;
                       proxy_cache_bypass \$http_upgrade;
                       proxy_set_header X-Real-IP \$remote_addr;
                       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                      proxy_set_header X-Forwarded-Proto \$scheme;
-                      
-                      # Timeouts
-                      proxy_connect_timeout 60s;
-                      proxy_send_timeout 60s;
-                      proxy_read_timeout 60s;
-                  }
-                  
-                  # Static file caching
-                  location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
-                      expires 30d;
-                      add_header Cache-Control 'public, no-transform';
                   }
               }
           }
           EOL
           
-          # Restart services
           sudo systemctl enable nginx
           sudo systemctl restart nginx
-          sudo setsebool -P httpd_can_network_connect 1
           
-          # Verify services are running
-          pm2 list
-          sudo systemctl status nginx --no-pager
-        "
+          # Ensure SELinux allows Nginx to proxy requests
+          sudo setsebool -P httpd_can_network_connect 1
+        '
         
         rm -f deploy-key.pem 
