@@ -45,8 +45,27 @@ jobs:
         HOST: ${{ secrets.EC2_PUBLIC_IP }}
         USER: ec2-user
       run: |
-        # Save and decode private key from secrets
-        echo "$PRIVATE_KEY" | base64 -d > deploy-key.pem
+        # Save private key from secrets with error checking
+        if [[ -z "$PRIVATE_KEY" ]]; then
+          echo "Error: PRIVATE_KEY is empty"
+          exit 1
+        fi
+        
+        # Try direct write first (if key is not base64 encoded)
+        echo "$PRIVATE_KEY" > deploy-key.pem || {
+          # If direct write fails, try base64 decode
+          echo "$PRIVATE_KEY" | base64 -d -i > deploy-key.pem || {
+            echo "Error: Failed to decode private key"
+            exit 1
+          }
+        }
+        
+        # Verify the key file exists and has content
+        if [[ ! -s deploy-key.pem ]]; then
+          echo "Error: deploy-key.pem is empty or does not exist"
+          exit 1
+        fi
+        
         chmod 600 deploy-key.pem
         
         # Test SSH connection
