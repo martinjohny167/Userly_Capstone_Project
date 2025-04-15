@@ -190,5 +190,4 @@ jobs:
           sudo setsebool -P httpd_can_network_connect 1
         "
         
-        rm -f deploy-key.pem
-// ... existing code ...
+        rm -f deploy-key.pem 
