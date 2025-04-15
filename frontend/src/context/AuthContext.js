@@ -14,12 +14,26 @@ export const AuthProvider = ({ children }) => {
     const checkLoggedIn = () => {
       try {
         const user = JSON.parse(localStorage.getItem('user') || 'null');
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+        
+=======
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
         if (user) {
           setCurrentUser(user);
           setIsAuthenticated(true);
         }
       } catch (error) {
         console.error('Error checking authentication status:', error);
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+        // Clear potentially corrupted data
+=======
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
         localStorage.removeItem('user');
       } finally {
         setIsLoading(false);
@@ -29,7 +43,15 @@ export const AuthProvider = ({ children }) => {
     checkLoggedIn();
   }, []);
 
+<<<<<<< HEAD
   // Login function - simplified without token
+=======
+<<<<<<< HEAD
+  // Login function
+=======
+  // Login function - simplified without token
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
   const login = (userData) => {
     localStorage.setItem('user', JSON.stringify(userData));
     setCurrentUser(userData);
@@ -43,6 +65,13 @@ export const AuthProvider = ({ children }) => {
     setIsAuthenticated(false);
   };
 
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+  // Context value
+=======
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
   const value = {
     currentUser,
     isAuthenticated,

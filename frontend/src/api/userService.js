@@ -5,6 +5,26 @@ const userService = {
   // Authentication
   login: async (credentials) => {
     try {
+<<<<<<< HEAD
+      console.log('Attempting login with:', { email: credentials.email });
+=======
+<<<<<<< HEAD
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
+      const response = await api.post('/auth/login', credentials);
+      console.log('Login response:', response.data);
+      
+      if (response.data && response.data.user) {
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+        return response.data;
+      } else {
+        throw new Error('Invalid response format from server');
+      }
+    } catch (error) {
+<<<<<<< HEAD
+      console.error('Login error:', error.response?.data || error.message);
+=======
+      console.error('Login error:', error);
+=======
       console.log('Attempting login with:', { email: credentials.email });
       const response = await api.post('/auth/login', credentials);
       console.log('Login response:', response.data);
@@ -17,18 +37,36 @@ const userService = {
       }
     } catch (error) {
       console.error('Login error:', error.response?.data || error.message);
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
       throw error;
     }
   },
 
   register: async (userData) => {
     try {
+<<<<<<< HEAD
+      console.log('Attempting registration with:', { email: userData.email });
+=======
+<<<<<<< HEAD
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
+      const response = await api.post('/auth/register', userData);
+      console.log('Registration response:', response.data);
+      return response.data;
+    } catch (error) {
+<<<<<<< HEAD
+      console.error('Registration error:', error.response?.data || error.message);
+=======
+      console.error('Registration error:', error);
+=======
       console.log('Attempting registration with:', { email: userData.email });
       const response = await api.post('/auth/register', userData);
       console.log('Registration response:', response.data);
       return response.data;
     } catch (error) {
       console.error('Registration error:', error.response?.data || error.message);
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
       throw error;
     }
   },
@@ -37,10 +75,23 @@ const userService = {
   getUsers: async () => {
     try {
       const response = await api.get('/users');
+<<<<<<< HEAD
       console.log('Fetched users:', response.data);
       return response.data;
     } catch (error) {
       console.error('Error fetching users:', error.response?.data || error.message);
+=======
+<<<<<<< HEAD
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching users:', error);
+=======
+      console.log('Fetched users:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching users:', error.response?.data || error.message);
+>>>>>>> source-repo/main
+>>>>>>> ade78267cbc48e0678f5330b01ba6901ba801f27
       throw error;
     }
   },
