@@ -55,7 +55,7 @@ jobs:
           key: ${{ env.EC2_KEY }}
           source: |
             docker-compose.yml
-            backend.env
+            backend/.env
           target: "~/app"
 
       - name: SSH and deploy on EC2
