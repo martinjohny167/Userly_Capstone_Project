@@ -5,17 +5,11 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
-    outputs:
-      cache-key: ${{ steps.cache-key.outputs.value }}
     
     steps:
     - uses: actions/checkout@v3
-    
-    - name: Generate cache key
-      id: cache-key
-      run: echo "value=$(date +%s)" >> $GITHUB_OUTPUT
     
     - name: Set up Node.js
       uses: actions/setup-node@v3
@@ -23,72 +17,26 @@ jobs:
         node-version: '16'
         cache: 'npm'
         
-    - name: Cache Frontend Dependencies
+    - name: Cache Dependencies
       uses: actions/cache@v3
       with:
         path: |
-          frontend/node_modules
+          **/node_modules
           ~/.npm
-        key: ${{ runner.os }}-frontend-${{ hashFiles('frontend/package-lock.json') }}
+        key: ${{ runner.os }}-modules-${{ hashFiles('**/package-lock.json') }}
         restore-keys: |
-          ${{ runner.os }}-frontend-
-    
-    - name: Cache Backend Dependencies
-      uses: actions/cache@v3
-      with:
-        path: |
-          backend/node_modules
-          ~/.npm
-        key: ${{ runner.os }}-backend-${{ hashFiles('backend/package-lock.json') }}
-        restore-keys: |
-          ${{ runner.os }}-backend-
+          ${{ runner.os }}-modules-
 
     - name: Install and Build Frontend
       working-directory: frontend
       run: |
-        npm ci --prefer-offline
+        npm ci --prefer-offline --no-audit
         echo "REACT_APP_API_URL=http://${{ secrets.EC2_PUBLIC_IP }}/api" > .env
-        npm run build
+        npm run build --if-present
         
     - name: Install Backend Dependencies
       working-directory: backend
-      run: npm ci --prefer-offline
-        
-    - name: Upload Frontend Build
-      uses: actions/upload-artifact@v3
-      with:
-        name: frontend-build
-        path: frontend/build
-        
-    - name: Upload Backend Files
-      uses: actions/upload-artifact@v3
-      with:
-        name: backend-files
-        path: backend
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Download Frontend Build
-      uses: actions/download-artifact@v3
-      with:
-        name: frontend-build
-        path: frontend/build
-        
-    - name: Download Backend Files
-      uses: actions/download-artifact@v3
-      with:
-        name: backend-files
-        path: backend
-        
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_REGION }}
+      run: npm ci --prefer-offline --no-audit
         
     - name: Deploy to EC2
       env:
@@ -96,19 +44,31 @@ jobs:
         HOST: ${{ secrets.EC2_PUBLIC_IP }}
         USER: ec2-user
       run: |
+        # Setup SSH
         echo "$PRIVATE_KEY" > deploy-key.pem
         chmod 600 deploy-key.pem
         
-        # Create directories and copy files in parallel
-        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'mkdir -p ~/app/{frontend/build,backend}'
+        # Optimize SSH connections
+        cat >> ~/.ssh/config << EOL
+        Host ec2
+          HostName $HOST
+          User $USER
+          IdentityFile $PWD/deploy-key.pem
+          StrictHostKeyChecking no
+          UserKnownHostsFile /dev/null
+        EOL
         
-        # Use tar for faster file transfer
-        tar czf - frontend/build/* | ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'cd ~/app && tar xzf -'
-        tar czf - backend/* | ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'cd ~/app && tar xzf -'
+        # Create directories and prepare for deployment
+        ssh ec2 'mkdir -p ~/app/{frontend/build,backend}'
         
-        # Create backend .env and configure services
-        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} "
-          # Create backend .env
+        # Parallel file transfer using tar for compression
+        (tar czf - -C frontend/build/ .) | ssh ec2 'cd ~/app/frontend/build && tar xzf -' &
+        (tar czf - -C backend/ .) | ssh ec2 'cd ~/app/backend && tar xzf -' &
+        wait
+        
+        # Configure and deploy
+        ssh ec2 "
+          # Update backend environment
           cat > ~/app/backend/.env << 'EOL'
           PORT=5000
           DB_HOST=${{ secrets.DB_HOST }}
@@ -119,7 +79,7 @@ jobs:
           CORS_ORIGIN=http://${{ secrets.EC2_PUBLIC_IP }}
           EOL
 
-          # Install dependencies if needed
+          # Install or update dependencies
           if ! command -v node &> /dev/null; then
             curl -fsSL https://rpm.nodesource.com/setup_16.x | sudo bash -
             sudo yum install -y nodejs
@@ -130,35 +90,55 @@ jobs:
           fi
           
           if ! command -v nginx &> /dev/null; then
-            sudo amazon-linux-extras install nginx1
+            sudo amazon-linux-extras install -y nginx1
           fi
           
           # Update backend and restart service
           cd ~/app/backend
-          npm ci --production --prefer-offline
-          pm2 delete backend || true
+          npm ci --prefer-offline --no-audit --production
+          pm2 delete backend 2>/dev/null || true
           pm2 start server.js --name backend
           
-          # Configure and restart Nginx
+          # Configure Nginx with optimizations
           sudo tee /etc/nginx/nginx.conf << 'EOL'
           user nginx;
           worker_processes auto;
-          error_log /var/log/nginx/error.log;
+          worker_rlimit_nofile 65535;
+          error_log /var/log/nginx/error.log warn;
           pid /run/nginx.pid;
 
           events {
-              worker_connections 1024;
+              worker_connections 2048;
+              multi_accept on;
+              use epoll;
           }
 
           http {
               include             /etc/nginx/mime.types;
               default_type        application/octet-stream;
+              
+              # Optimization settings
               sendfile            on;
               tcp_nopush          on;
               tcp_nodelay         on;
               keepalive_timeout   65;
+              types_hash_max_size 2048;
+              
+              # Compression
               gzip               on;
-              gzip_types         text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+              gzip_vary          on;
+              gzip_proxied       any;
+              gzip_comp_level    6;
+              gzip_buffers       16 8k;
+              gzip_http_version  1.1;
+              gzip_min_length    256;
+              gzip_types         text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript application/vnd.ms-fontobject application/x-font-ttf font/opentype image/svg+xml image/x-icon;
+              
+              # File handle caching
+              open_file_cache max=1000 inactive=20s;
+              open_file_cache_valid 30s;
+              open_file_cache_min_uses 2;
+              open_file_cache_errors on;
               
               server {
                   listen       80;
@@ -175,19 +155,36 @@ jobs:
                       proxy_pass http://localhost:5000/;
                       proxy_http_version 1.1;
                       proxy_set_header Upgrade \$http_upgrade;
-                      proxy_set_header Connection "upgrade";
+                      proxy_set_header Connection 'upgrade';
                       proxy_set_header Host \$host;
                       proxy_cache_bypass \$http_upgrade;
                       proxy_set_header X-Real-IP \$remote_addr;
                       proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                      proxy_set_header X-Forwarded-Proto \$scheme;
+                      
+                      # Timeouts
+                      proxy_connect_timeout 60s;
+                      proxy_send_timeout 60s;
+                      proxy_read_timeout 60s;
+                  }
+                  
+                  # Static file caching
+                  location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                      expires 30d;
+                      add_header Cache-Control 'public, no-transform';
                   }
               }
           }
           EOL
           
+          # Restart services
           sudo systemctl enable nginx
           sudo systemctl restart nginx
           sudo setsebool -P httpd_can_network_connect 1
+          
+          # Verify services are running
+          pm2 list
+          sudo systemctl status nginx --no-pager
         "
         
         rm -f deploy-key.pem 
