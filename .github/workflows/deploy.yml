@@ -19,16 +19,18 @@ jobs:
     - name: Install Frontend Dependencies
       working-directory: frontend
       run: |
-        npm install
+        npm ci
         echo "REACT_APP_API_URL=http://${{ secrets.EC2_PUBLIC_IP }}/api" > .env
         
     - name: Build Frontend
       working-directory: frontend
-      run: npm run build
+      run: |
+        npm install react-scripts --save-dev
+        npx react-scripts build
         
     - name: Install Backend Dependencies
       working-directory: backend
-      run: npm install
+      run: npm ci
         
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v1
@@ -79,7 +81,7 @@ jobs:
           fi
           
           cd ~/app/backend
-          npm install --production
+          npm ci --production
           pm2 delete backend || true
           pm2 start server.js --name backend
           
@@ -140,4 +142,4 @@ jobs:
           sudo systemctl restart nginx
         '
         
-        rm -f private_key.pem 
+        rm -f private_key.pem
