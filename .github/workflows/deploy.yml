@@ -66,6 +66,7 @@ jobs:
           key: ${{ env.EC2_KEY }}
           script: |
             cd ~/app
+            mv backend.env .env 2>/dev/null || true
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo "${{ env.ECR_BACKEND_REPO }}" | cut -d'/' -f1)
             docker pull ${{ env.ECR_BACKEND_REPO }}:latest
             docker pull ${{ env.ECR_FRONTEND_REPO }}:latest
