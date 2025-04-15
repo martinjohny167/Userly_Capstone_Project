@@ -14,14 +14,20 @@ export const AuthProvider = ({ children }) => {
     const checkLoggedIn = () => {
       try {
         const user = JSON.parse(localStorage.getItem('user') || 'null');
+<<<<<<< HEAD
         
+=======
+>>>>>>> source-repo/main
         if (user) {
           setCurrentUser(user);
           setIsAuthenticated(true);
         }
       } catch (error) {
         console.error('Error checking authentication status:', error);
+<<<<<<< HEAD
         // Clear potentially corrupted data
+=======
+>>>>>>> source-repo/main
         localStorage.removeItem('user');
       } finally {
         setIsLoading(false);
@@ -31,7 +37,11 @@ export const AuthProvider = ({ children }) => {
     checkLoggedIn();
   }, []);
 
+<<<<<<< HEAD
   // Login function
+=======
+  // Login function - simplified without token
+>>>>>>> source-repo/main
   const login = (userData) => {
     localStorage.setItem('user', JSON.stringify(userData));
     setCurrentUser(userData);
@@ -45,7 +55,10 @@ export const AuthProvider = ({ children }) => {
     setIsAuthenticated(false);
   };
 
+<<<<<<< HEAD
   // Context value
+=======
+>>>>>>> source-repo/main
   const value = {
     currentUser,
     isAuthenticated,

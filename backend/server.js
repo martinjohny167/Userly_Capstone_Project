@@ -3,6 +3,10 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const path = require('path');
+<<<<<<< HEAD
+=======
+const userRoutes = require('./routes/userRoutes');
+>>>>>>> source-repo/main
 require('dotenv').config();
 
 // Initialize express app
@@ -21,6 +25,12 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
+<<<<<<< HEAD
+=======
+// Mount routes
+app.use('/api', userRoutes);
+
+>>>>>>> source-repo/main
 // Database connection configuration from environment variables
 const dbConfig = {
   host: process.env.DB_HOST,
