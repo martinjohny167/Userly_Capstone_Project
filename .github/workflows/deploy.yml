@@ -29,32 +29,33 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build backend Docker image
         run: |
-          docker build -t $ECR_BACKEND_REPO:latest ./backend
+          docker build -t ${{ env.ECR_BACKEND_REPO }}:latest ./backend
 
       - name: Build frontend Docker image
         run: |
-          docker build -t $ECR_FRONTEND_REPO:latest ./frontend
+          docker build -t ${{ env.ECR_FRONTEND_REPO }}:latest ./frontend
 
       - name: Push backend image to ECR
         run: |
-          docker push $ECR_BACKEND_REPO:latest
+          docker push ${{ env.ECR_BACKEND_REPO }}:latest
 
       - name: Push frontend image to ECR
         run: |
-          docker push $ECR_FRONTEND_REPO:latest
+          docker push ${{ env.ECR_FRONTEND_REPO }}:latest
 
-      - name: Copy docker-compose.yml to EC2
+      - name: Copy deployment files to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ env.EC2_HOST }}
           username: ${{ env.EC2_USER }}
           key: ${{ env.EC2_KEY }}
-          source: "docker-compose.yml"
+          source: |
+            docker-compose.yml
+            backend.env
           target: "~/app"
 
       - name: SSH and deploy on EC2
@@ -65,9 +66,8 @@ jobs:
           key: ${{ env.EC2_KEY }}
           script: |
             cd ~/app
-            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo $ECR_BACKEND_REPO | cut -d'/' -f1)
-            docker pull $ECR_BACKEND_REPO:latest
-            docker pull $ECR_FRONTEND_REPO:latest
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo "${{ env.ECR_BACKEND_REPO }}" | cut -d'/' -f1)
+            docker pull ${{ env.ECR_BACKEND_REPO }}:latest
+            docker pull ${{ env.ECR_FRONTEND_REPO }}:latest
             docker-compose down || true
-
             docker-compose up -d --remove-orphans
