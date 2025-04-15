@@ -69,8 +69,5 @@ jobs:
             docker pull $ECR_BACKEND_REPO:latest
             docker pull $ECR_FRONTEND_REPO:latest
             docker-compose down || true
-<<<<<<< HEAD
             docker-compose up -d --remove-orphans 
-=======
-            docker-compose up -d --remove-orphans
->>>>>>> ed4f1b08c0351165600f937aeaf3796a1f429621
+
