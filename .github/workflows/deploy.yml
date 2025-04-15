@@ -1,181 +1,72 @@
-name: Deploy to EC2
+name: Deploy to EC2 via ECR
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  EC2_HOST: ${{ secrets.EC2_HOST }}
+  EC2_USER: ${{ secrets.EC2_USER }}
+  EC2_KEY: ${{ secrets.EC2_KEY }}
+  ECR_BACKEND_REPO: ${{ secrets.ECR_BACKEND_REPO }}
+  ECR_FRONTEND_REPO: ${{ secrets.ECR_FRONTEND_REPO }}
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v2
-    
-    - name: Set up Node.js
-      uses: actions/setup-node@v2
-      with:
-        node-version: '16'
-        
-    - name: Install Frontend Dependencies
-      working-directory: frontend
-      run: |
-        npm ci
-        echo "REACT_APP_API_URL=http://${{ secrets.EC2_PUBLIC_IP }}/api" > .env
-        
-    - name: Build Frontend
-      working-directory: frontend
-      run: |
-        npm install react-scripts --save-dev
-        npx react-scripts build
-        
-    - name: Install Backend Dependencies
-      working-directory: backend
-      run: npm ci
-        
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v1
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ secrets.AWS_REGION }}
-        
-    - name: Deploy to EC2
-      env:
-        PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        HOST: ${{ secrets.EC2_PUBLIC_IP }}
-        USER: ec2-user
-      run: |
-        # Save private key from secrets with error checking
-        if [[ -z "$PRIVATE_KEY" ]]; then
-          echo "Error: PRIVATE_KEY is empty"
-          exit 1
-        fi
-        
-        # Try direct write first (if key is not base64 encoded)
-        echo "$PRIVATE_KEY" > deploy-key.pem || {
-          # If direct write fails, try base64 decode
-          echo "$PRIVATE_KEY" | base64 -d -i > deploy-key.pem || {
-            echo "Error: Failed to decode private key"
-            exit 1
-          }
-        }
-        
-        # Verify the key file exists and has content
-        if [[ ! -s deploy-key.pem ]]; then
-          echo "Error: deploy-key.pem is empty or does not exist"
-          exit 1
-        fi
-        
-        chmod 600 deploy-key.pem
-        
-        # Test SSH connection
-        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'echo "SSH connection successful"'
-        
-        # Create deployment directory structure
-        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} '
-          mkdir -p ~/app/frontend/build
-          mkdir -p ~/app/backend
-        '
-        
-        # Copy frontend build
-        scp -i deploy-key.pem -o StrictHostKeyChecking=no -r frontend/build/* ${USER}@${HOST}:~/app/frontend/build/
-        
-        # Copy backend files
-        scp -i deploy-key.pem -o StrictHostKeyChecking=no -r backend/* ${USER}@${HOST}:~/app/backend/
-        
-        # Create backend .env file
-        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} "
-          cat > ~/app/backend/.env << 'EOL'
-          PORT=5000
-          DB_HOST=${{ secrets.DB_HOST }}
-          DB_USER=${{ secrets.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_NAME=${{ secrets.DB_NAME }}
-          DB_PORT=3306
-          CORS_ORIGIN=http://${{ secrets.EC2_PUBLIC_IP }}
-          EOL
-        "
-        
-        # Install dependencies and start services
-        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} '
-          # Install Node.js if not installed
-          if ! command -v node &> /dev/null; then
-            curl -fsSL https://rpm.nodesource.com/setup_16.x | sudo bash -
-            sudo yum install -y nodejs
-          fi
-          
-          # Install PM2 if not installed
-          if ! command -v pm2 &> /dev/null; then
-            sudo npm install -g pm2
-          fi
-          
-          cd ~/app/backend
-          npm ci --production
-          pm2 delete backend || true
-          pm2 start server.js --name backend
-          
-          # Configure Nginx
-          if ! command -v nginx &> /dev/null; then
-            sudo yum install -y nginx
-          fi
-          
-          sudo tee /etc/nginx/nginx.conf << EOL
-          user nginx;
-          worker_processes auto;
-          error_log /var/log/nginx/error.log;
-          pid /run/nginx.pid;
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-          include /usr/share/nginx/modules/*.conf;
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-          events {
-              worker_connections 1024;
-          }
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-          http {
-              log_format  main  '\$remote_addr - \$remote_user [\$time_local] "\$request" '
-                              '\$status \$body_bytes_sent "\$http_referer" '
-                              '"\$http_user_agent" "\$http_x_forwarded_for"';
+      - name: Build backend Docker image
+        run: |
+          docker build -t $ECR_BACKEND_REPO:latest ./backend
 
-              access_log  /var/log/nginx/access.log  main;
+      - name: Build frontend Docker image
+        run: |
+          docker build -t $ECR_FRONTEND_REPO:latest ./frontend
 
-              sendfile            on;
-              tcp_nopush          on;
-              tcp_nodelay         on;
-              keepalive_timeout   65;
-              types_hash_max_size 4096;
+      - name: Push backend image to ECR
+        run: |
+          docker push $ECR_BACKEND_REPO:latest
 
-              include             /etc/nginx/mime.types;
-              default_type        application/octet-stream;
+      - name: Push frontend image to ECR
+        run: |
+          docker push $ECR_FRONTEND_REPO:latest
 
-              server {
-                  listen       80;
-                  server_name  _;
-                  root         /home/ec2-user/app/frontend/build;
+      - name: Copy docker-compose.yml to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.EC2_KEY }}
+          source: "docker-compose.yml"
+          target: "~/app"
 
-                  location / {
-                      try_files \$uri \$uri/ /index.html;
-                      add_header Cache-Control "no-cache, no-store, must-revalidate";
-                  }
-
-                  location /api/ {
-                      proxy_pass http://localhost:5000/;
-                      proxy_http_version 1.1;
-                      proxy_set_header Upgrade \$http_upgrade;
-                      proxy_set_header Connection "upgrade";
-                      proxy_set_header Host \$host;
-                      proxy_cache_bypass \$http_upgrade;
-                      proxy_set_header X-Real-IP \$remote_addr;
-                      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                  }
-              }
-          }
-          EOL
-          
-          sudo systemctl enable nginx
-          sudo systemctl restart nginx
-          
-          # Ensure SELinux allows Nginx to proxy requests
-          sudo setsebool -P httpd_can_network_connect 1
-        '
-        
-        rm -f deploy-key.pem 
+      - name: SSH and deploy on EC2
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_HOST }}
+          username: ${{ env.EC2_USER }}
+          key: ${{ env.EC2_KEY }}
+          script: |
+            cd ~/app
+            aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo $ECR_BACKEND_REPO | cut -d'/' -f1)
+            docker pull $ECR_BACKEND_REPO:latest
+            docker pull $ECR_FRONTEND_REPO:latest
+            docker-compose down || true
+            docker-compose up -d --remove-orphans 

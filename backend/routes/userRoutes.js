@@ -9,7 +9,7 @@ const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || 'root',
-  database: process.env.DB_NAME_TEST || 'user_management_test',
+  database: process.env.DB_NAME || 'usermanagement',
   port: parseInt(process.env.DB_PORT) || 3306,
   charset: 'utf8mb4'
 };
@@ -17,9 +17,25 @@ const dbConfig = {
 // Create MySQL connection pool
 const pool = mysql.createPool(dbConfig);
 
+// Test database connection
+const testConnection = async () => {
+  try {
+    const connection = await pool.getConnection();
+    console.log('Database connection successful');
+    connection.release();
+  } catch (error) {
+    console.error('Database connection error:', error);
+    throw error;
+  }
+};
+
+// Test connection on startup
+testConnection();
+
 // Authentication Routes
 router.post('/auth/register', async (req, res) => {
   try {
+    console.log('Register request received:', req.body);
     const { name, email, password, role } = req.body;
     
     if (!name || !email || !password) {
@@ -42,6 +58,8 @@ router.post('/auth/register', async (req, res) => {
       [name, email, userRole, hashedPassword]
     );
     
+    console.log('User registered successfully:', { id: result.insertId, name, email, role: userRole });
+    
     res.status(201).json({
       message: 'User registered successfully',
       user: {
@@ -53,12 +71,13 @@ router.post('/auth/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ message: 'Failed to register user' });
+    res.status(500).json({ message: 'Failed to register user', error: error.message });
   }
 });
 
 router.post('/auth/login', async (req, res) => {
   try {
+    console.log('Login request received:', { email: req.body.email });
     const { email, password } = req.body;
     
     if (!email || !password) {
@@ -66,6 +85,7 @@ router.post('/auth/login', async (req, res) => {
     }
     
     const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+    console.log('Users found:', users.length);
     
     if (users.length === 0) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -79,6 +99,7 @@ router.post('/auth/login', async (req, res) => {
     }
     
     const { password: _, ...userWithoutPassword } = user;
+    console.log('Login successful for user:', { id: user.id, email: user.email });
     
     res.json({
       message: 'Login successful',
@@ -86,7 +107,7 @@ router.post('/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ message: 'Failed to authenticate user' });
+    res.status(500).json({ message: 'Failed to authenticate user', error: error.message });
   }
 });
 

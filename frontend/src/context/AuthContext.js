@@ -14,14 +14,12 @@ export const AuthProvider = ({ children }) => {
     const checkLoggedIn = () => {
       try {
         const user = JSON.parse(localStorage.getItem('user') || 'null');
-        
         if (user) {
           setCurrentUser(user);
           setIsAuthenticated(true);
         }
       } catch (error) {
         console.error('Error checking authentication status:', error);
-        // Clear potentially corrupted data
         localStorage.removeItem('user');
       } finally {
         setIsLoading(false);
@@ -31,7 +29,7 @@ export const AuthProvider = ({ children }) => {
     checkLoggedIn();
   }, []);
 
-  // Login function
+  // Login function - simplified without token
   const login = (userData) => {
     localStorage.setItem('user', JSON.stringify(userData));
     setCurrentUser(userData);
@@ -45,7 +43,6 @@ export const AuthProvider = ({ children }) => {
     setIsAuthenticated(false);
   };
 
-  // Context value
   const value = {
     currentUser,
     isAuthenticated,

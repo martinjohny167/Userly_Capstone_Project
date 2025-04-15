@@ -3,6 +3,7 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
 const path = require('path');
+const userRoutes = require('./routes/userRoutes');
 require('dotenv').config();
 
 // Initialize express app
@@ -20,6 +21,9 @@ const corsOptions = {
 // Middleware
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// Mount routes
+app.use('/api', userRoutes);
 
 // Database connection configuration from environment variables
 const dbConfig = {
