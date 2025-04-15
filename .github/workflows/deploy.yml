@@ -45,7 +45,6 @@ jobs:
         HOST: ${{ secrets.EC2_PUBLIC_IP }}
         USER: ec2-user
       run: |
-        # Fix: Properly decode multiline private key
         echo "$PRIVATE_KEY" | sed 's/\\n/\n/g' > private_key.pem
         chmod 600 private_key.pem
 
@@ -61,18 +60,16 @@ jobs:
         # Copy backend files
         scp -o StrictHostKeyChecking=no -i private_key.pem -r backend/* ${USER}@${HOST}:~/app/backend/
 
-        # Create backend .env file
-        ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} "
-          cat > ~/app/backend/.env << 'EOL'
-PORT=5000
+        # Safely write backend .env file
+        ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} bash -c "'
+echo \"PORT=5000
 DB_HOST=${{ secrets.DB_HOST }}
 DB_USER=${{ secrets.DB_USER }}
 DB_PASSWORD=${{ secrets.DB_PASSWORD }}
 DB_NAME=${{ secrets.DB_NAME }}
 DB_PORT=3306
-CORS_ORIGIN=http://${{ secrets.EC2_PUBLIC_IP }}
-EOL
-        "
+CORS_ORIGIN=http://${{ secrets.EC2_PUBLIC_IP }}\" > ~/app/backend/.env
+'"
 
         # Install dependencies and start services
         ssh -o StrictHostKeyChecking=no -i private_key.pem ${USER}@${HOST} '
@@ -97,7 +94,7 @@ EOL
             sudo yum install -y nginx
           fi
 
-          sudo tee /etc/nginx/nginx.conf << EOL
+          sudo tee /etc/nginx/nginx.conf > /dev/null << EOL
 user nginx;
 worker_processes auto;
 error_log /var/log/nginx/error.log;
@@ -153,11 +150,11 @@ EOL
           sudo systemctl enable nginx
           sudo systemctl restart nginx
 
-          # Allow Nginx to make network requests (SELinux config)
+          # Allow Nginx to make outbound connections
           sudo setsebool -P httpd_can_network_connect 1
         '
 
-        # Clean up
+        # Clean up SSH key
         rm -f private_key.pem
 
     - name: Output Deployed URL
