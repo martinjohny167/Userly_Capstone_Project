@@ -1,15 +1,14 @@
-version: '3.8'
 services:
   backend:
-    image: ${ECR_BACKEND_REPO}:latest
+    image: 183494329089.dkr.ecr.us-east-1.amazonaws.com/backendrepo:latest
     ports:
       - "5000:5000"
-    env_file:
-      - ./backend.env # Or use 'environment:' if you want to inline variables
+    # Uncomment and edit the next line if you have a backend.env file with environment variables
+    # env_file: ./backend.env
     restart: always
 
   frontend:
-    image: ${ECR_FRONTEND_REPO}:latest
+    image: 183494329089.dkr.ecr.us-east-1.amazonaws.com/frontendrepo:latest
     ports:
       - "3000:80"
     depends_on:
