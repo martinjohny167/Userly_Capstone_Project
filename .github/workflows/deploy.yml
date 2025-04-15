@@ -51,37 +51,36 @@ jobs:
           exit 1
         fi
         
-        # Try direct write first (if key is not base64 encoded)
         echo "$PRIVATE_KEY" > deploy-key.pem || {
-          # If direct write fails, try base64 decode
           echo "$PRIVATE_KEY" | base64 -d -i > deploy-key.pem || {
             echo "Error: Failed to decode private key"
             exit 1
           }
         }
         
-        # Verify the key file exists and has content
-        if [[ ! -s deploy-key.pem ]]; then
-          echo "Error: deploy-key.pem is empty or does not exist"
-          exit 1
-        fi
-        
         chmod 600 deploy-key.pem
+        
+        # Create deployment archive excluding node_modules and .git
+        tar --exclude="*/node_modules/*" \
+            --exclude=".git" \
+            --exclude="*/build/*" \
+            -czf deploy.tar.gz \
+            frontend/build \
+            backend
         
         # Test SSH connection
         ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'echo "SSH connection successful"'
         
-        # Create deployment directory structure
+        # Create app directory
+        ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} 'mkdir -p ~/app'
+        
+        # Copy and extract deployment archive
+        scp -i deploy-key.pem -o StrictHostKeyChecking=no deploy.tar.gz ${USER}@${HOST}:~/app/
         ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} '
-          mkdir -p ~/app/frontend/build
-          mkdir -p ~/app/backend
+          cd ~/app
+          tar xzf deploy.tar.gz
+          rm deploy.tar.gz
         '
-        
-        # Copy frontend build
-        scp -i deploy-key.pem -o StrictHostKeyChecking=no -r frontend/build/* ${USER}@${HOST}:~/app/frontend/build/
-        
-        # Copy backend files
-        scp -i deploy-key.pem -o StrictHostKeyChecking=no -r backend/* ${USER}@${HOST}:~/app/backend/
         
         # Create backend .env file
         ssh -i deploy-key.pem -o StrictHostKeyChecking=no ${USER}@${HOST} "
@@ -179,3 +178,4 @@ jobs:
         '
         
         rm -f deploy-key.pem 
+        
