@@ -45,7 +45,7 @@ jobs:
         HOST: ${{ secrets.EC2_PUBLIC_IP }}
         USER: ec2-user
       run: |
-        echo "$PRIVATE_KEY" > private_key.pem
+        echo "$PRIVATE_KEY" | sed 's/\\n/\n/g' > private_key.pem
         chmod 600 private_key.pem
         
         # Create deployment directory structure
@@ -155,4 +155,4 @@ jobs:
           sudo setsebool -P httpd_can_network_connect 1
         '
         
-        rm -f private_key.pem 
+        rm -f private_key.pem
