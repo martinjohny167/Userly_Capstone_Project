@@ -14,41 +14,30 @@ env:
   ECR_FRONTEND_REPO: ${{ secrets.ECR_FRONTEND_REPO }}
 
 jobs:
-  codeql-scan:
-    name: CodeQL Scan
+  build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
       security-events: write
 
-    strategy:
-      matrix:
-        language: [javascript] # You can add more like 'python', 'go' if needed
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      # === CodeQL Scanning (v3) ===
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v2
+        uses: github/codeql-action/init@v3
         with:
-          languages: ${{ matrix.language }}
+          languages: javascript
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v2
+      - name: Autobuild for CodeQL
+        uses: github/codeql-action/autobuild@v3
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v2
+        uses: github/codeql-action/analyze@v3
 
-  build-and-deploy:
-    needs: codeql-scan
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
+      # === AWS Auth & Docker Login ===
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -59,6 +48,7 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      # === Docker Build & Push ===
       - name: Build backend Docker image
         run: |
           docker build -t ${{ env.ECR_BACKEND_REPO }}:latest ./backend
@@ -75,6 +65,7 @@ jobs:
         run: |
           docker push ${{ env.ECR_FRONTEND_REPO }}:latest
 
+      # === Deploy to EC2 ===
       - name: Copy docker-compose.yml to EC2
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -92,7 +83,6 @@ jobs:
           key: ${{ env.EC2_KEY }}
           script: |
             cd ~/app
-
             echo "${{ secrets.BACKEND_ENV_CONTENT }}" > .env
 
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo "${{ env.ECR_BACKEND_REPO }}" | cut -d'/' -f1)
@@ -102,3 +92,9 @@ jobs:
 
             docker-compose down || true
             docker-compose up -d --remove-orphans
+
+      # === Show Frontend URL ===
+      - name: Deployment Success - Show Frontend URL
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "🌐 Frontend is live at: http://54.91.162.58:3000/"
