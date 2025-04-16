@@ -8,6 +8,6 @@ const DB_CONFIG = {
 };
 
 // API base URL - replace with your actual backend URL
-export const API_BASE_URL = 'http://localhost:5000/api';
+export const API_BASE_URL = 'http://54.91.162.58:5000/api';
 
 export default DB_CONFIG; 
