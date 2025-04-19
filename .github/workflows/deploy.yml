@@ -39,9 +39,9 @@ jobs:
       - name: Analyze code
         uses: github/codeql-action/analyze@v3
 
-  # === STAGE 2: Build & Push Docker Images ===
+  # === STAGE 2: Build Docker Images ===
   build:
-    name: Build & Push Docker Images
+    name: Build Docker Images
     runs-on: ubuntu-latest
     needs: codeql-scan
 
@@ -75,11 +75,25 @@ jobs:
         run: |
           docker push ${{ env.ECR_FRONTEND_REPO }}:latest
 
-  # === STAGE 3: Test ===
+  # === STAGE 3: Test Backend ===
   test:
     name: Run Backend Tests
     runs-on: ubuntu-latest
     needs: build
+
+    services:
+      mysql:
+        image: mysql:5.7
+        ports:
+          - 3306:3306
+        env:
+          MYSQL_DATABASE: usermanagement
+          MYSQL_ALLOW_EMPTY_PASSWORD: true
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
       - uses: actions/checkout@v3
@@ -93,40 +107,19 @@ jobs:
         working-directory: ./backend
         run: npm ci
 
-      - name: Start MySQL for tests
-        run: |
-          docker run --name test-mysql \
-            -e MYSQL_ROOT_PASSWORD= \
-            -e MYSQL_DATABASE=test_db \
-            -p 3306:3306 \
-            -d mysql:5.7
-
-      - name: Wait for MySQL to be ready
-        run: |
-          echo "Waiting for MySQL to be ready..."
-          for i in {1..30}; do
-            docker exec test-mysql mysqladmin ping -h127.0.0.1 -uroot && break
-            echo "MySQL not ready yet... retrying ($i/30)"
-            sleep 2
-          done
-
-      - name: Run tests/user.test.js directly with Jest
+      - name: Run Jest tests for user.test.js
         working-directory: ./backend
         env:
           DB_HOST: 127.0.0.1
           DB_USER: root
-          DB_PASSWORD: ""
-          DB_NAME: test_db
-          JWT_SECRET: testsecret
+          DB_PASSWORD: root
+          DB_NAME: usermanagement
+          JWT_SECRET: supersecretkey
         run: |
           npx jest tests/user.test.js --detectOpenHandles --forceExit
 
-      - name: Tear down MySQL
-        if: always()
-        run: docker rm -f test-mysql
-
   # === STAGE 4: Deploy to EC2 ===
-  deploy:
+  deploy-to-ec2:
     name: Deploy to EC2
     runs-on: ubuntu-latest
     needs: test
