@@ -85,7 +85,7 @@ jobs:
       mysql:
         image: mysql:5.7
         ports:
-          - 3306:3306
+          - 5000:5000
         env:
           MYSQL_DATABASE: usermanagement
           MYSQL_ALLOW_EMPTY_PASSWORD: true
@@ -110,9 +110,9 @@ jobs:
       - name: Run Jest tests for user.test.js
         working-directory: ./backend
         env:
-          DB_HOST: 127.0.0.1
-          DB_USER: root
-          DB_PASSWORD: root
+          DB_HOST: database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com
+          DB_USER: admin
+          DB_PASSWORD: project1234
           DB_NAME: usermanagement
           JWT_SECRET: supersecretkey
         run: |
