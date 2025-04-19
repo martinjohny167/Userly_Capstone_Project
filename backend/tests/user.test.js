@@ -238,7 +238,7 @@
 
 const request = require('supertest');
 const app = require('../app'); // adjust path as needed
-const db = require('../config/db'); // adjust path as needed
+const db = require('../config'); // adjust path as needed
 const bcrypt = require('bcrypt');
 
 const testUser = {
