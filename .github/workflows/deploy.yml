@@ -1,79 +1,3 @@
-# name: Deploy to EC2 via ECR
-
-# on:
-#   push:
-#     branches:
-#       - main
-
-# env:
-#   AWS_REGION: ${{ secrets.AWS_REGION }}
-#   EC2_HOST: ${{ secrets.EC2_HOST }}
-#   EC2_USER: ${{ secrets.EC2_USER }}
-#   EC2_KEY: ${{ secrets.EC2_KEY }}
-#   ECR_BACKEND_REPO: ${{ secrets.ECR_BACKEND_REPO }}
-#   ECR_FRONTEND_REPO: ${{ secrets.ECR_FRONTEND_REPO }}
-
-# jobs:
-#   build-and-deploy:
-#     runs-on: ubuntu-latest
-
-#     steps:
-#       - name: Checkout code
-#         uses: actions/checkout@v3
-
-#       - name: Configure AWS credentials
-#         uses: aws-actions/configure-aws-credentials@v2
-#         with:
-#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-#           aws-region: ${{ env.AWS_REGION }}
-
-#       - name: Login to Amazon ECR
-#         uses: aws-actions/amazon-ecr-login@v2
-
-#       - name: Build backend Docker image
-#         run: |
-#           docker build -t ${{ env.ECR_BACKEND_REPO }}:latest ./backend
-
-#       - name: Build frontend Docker image
-#         run: |
-#           docker build -t ${{ env.ECR_FRONTEND_REPO }}:latest ./frontend
-
-#       - name: Push backend image to ECR
-#         run: |
-#           docker push ${{ env.ECR_BACKEND_REPO }}:latest
-
-#       - name: Push frontend image to ECR
-#         run: |
-#           docker push ${{ env.ECR_FRONTEND_REPO }}:latest
-
-#       - name: Copy deployment files to EC2
-#         uses: appleboy/scp-action@v0.1.7
-#         with:
-#           host: ${{ env.EC2_HOST }}
-#           username: ${{ env.EC2_USER }}
-#           key: ${{ env.EC2_KEY }}
-#           source: |
-#             docker-compose.yml
-#             backend/.env
-#           target: "~/app"
-
-#       - name: SSH and deploy on EC2
-#         uses: appleboy/ssh-action@v1.0.3
-#         with:
-#           host: ${{ env.EC2_HOST }}
-#           username: ${{ env.EC2_USER }}
-#           key: ${{ env.EC2_KEY }}
-#           script: |
-#             cd ~/app
-#             mv backend.env .env 2>/dev/null || true
-#             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo "${{ env.ECR_BACKEND_REPO }}" | cut -d'/' -f1)
-#             docker pull ${{ env.ECR_BACKEND_REPO }}:latest
-#             docker pull ${{ env.ECR_FRONTEND_REPO }}:latest
-#             docker-compose down || true
-#             docker-compose up -d --remove-orphans
-
-
 name: Deploy to EC2 via ECR
 
 on:
@@ -89,9 +13,37 @@ env:
   ECR_BACKEND_REPO: ${{ secrets.ECR_BACKEND_REPO }}
   ECR_FRONTEND_REPO: ${{ secrets.ECR_FRONTEND_REPO }}
 
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
 jobs:
-  build-and-deploy:
+  # === STAGE 1: CodeQL Scan ===
+  codeql-scan:
+    name: CodeQL Scan
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze code
+        uses: github/codeql-action/analyze@v3
+
+  # === STAGE 2: Build & Push Docker Images ===
+  docker-build-push:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    needs: codeql-scan
 
     steps:
       - name: Checkout code
@@ -123,26 +75,13 @@ jobs:
         run: |
           docker push ${{ env.ECR_FRONTEND_REPO }}:latest
 
-      - name: Prepare env file for transfer
-        run: |
-          cp backend/.env backend/env.backup
+  # === STAGE 3: Deploy to EC2 ===
+  deploy-to-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: docker-build-push
 
-      - name: Debug file existence
-        run: |
-          ls -lah
-          ls -lah backend
-
-      - name: Copy deployment files to EC2
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ env.EC2_HOST }}
-          username: ${{ env.EC2_USER }}
-          key: ${{ env.EC2_KEY }}
-          source: |
-            docker-compose.yml
-            backend/env.backup
-          target: "~/app"
-
+    steps:
       - name: SSH and deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -151,9 +90,17 @@ jobs:
           key: ${{ env.EC2_KEY }}
           script: |
             cd ~/app
-            mv env.backup .env
+            echo "${{ secrets.BACKEND_ENV_CONTENT }}" > .env
+
             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo "${{ env.ECR_BACKEND_REPO }}" | cut -d'/' -f1)
+
             docker pull ${{ env.ECR_BACKEND_REPO }}:latest
             docker pull ${{ env.ECR_FRONTEND_REPO }}:latest
+
             docker-compose down || true
             docker-compose up -d --remove-orphans
+
+      - name: Deployment Success - Show Frontend URL
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "🌐 Frontend is live at: http://54.91.162.58:3000/"
