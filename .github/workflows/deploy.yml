@@ -274,7 +274,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y mysql-client
           echo "Loading schema..."
           export MYSQL_PWD=project1234
-          mysql -h database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com -u admin test_db < backend/init.sql
+          mysql -h database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com -u admin test_db < init.sql
           echo "Running tests..."
           npx jest tests/user.test.js --detectOpenHandles --forceExit
 
