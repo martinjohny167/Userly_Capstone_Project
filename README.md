@@ -1,4 +1,4 @@
-# Capstone Project - DevOps Full-Stack Deployment
+# Final Capstone Project - DevOps Full-Stack Deployment
 
 ## 📌 Project Overview
 
