@@ -1,221 +1,116 @@
-
-
-// // const request = require('supertest');
-// // const app = require('../app');
-// // const db = require('../config');
-
-// // let token = '';
-
-// // beforeAll(done => {
-// //   // Clear and setup test user
-// //   db.query('DELETE FROM users WHERE username = ?', ['testuser'], () => {
-// //     done();
-// //   });
-// // });
-
-// // afterAll(() => {
-// //   db.end(); // Close DB connection after tests
-// // });
-
-// // describe('User API', () => {
-// //   it('should register a new user', async () => {
-// //     const res = await request(app).post('/api/register').send({
-// //       username: 'testuser',
-// //       password: 'testpass'
-// //     });
-// //     expect(res.statusCode).toEqual(201);
-// //     expect(res.body.message).toBe('User registered');
-// //   });
-
-// //   it('should login and return token', async () => {
-// //     const res = await request(app).post('/api/login').send({
-// //       username: 'testuser',
-// //       password: 'testpass'
-// //     });
-// //     expect(res.statusCode).toEqual(200);
-// //     expect(res.body.token).toBeDefined();
-// //     token = res.body.token;
-// //   });
-
-// //   it('should fetch profile with token', async () => {
-// //     const res = await request(app)
-// //       .get('/api/profile')
-// //       .set('Authorization', `Bearer ${token}`);
-// //     expect(res.statusCode).toEqual(200);
-// //     expect(res.body.username).toBe('testuser');
-// //   });
-
-// //   it('should reject access without token', async () => {
-// //     const res = await request(app).get('/api/profile');
-// //     expect(res.statusCode).toEqual(401);
-// //   });
-
-// //   it('should reject wrong login', async () => {
-// //     const res = await request(app).post('/api/login').send({
-// //       username: 'testuser',
-// //       password: 'wrongpass'
-// //     });
-// //     expect(res.statusCode).toEqual(401);
-// //   });
-// // });
-
-
-// const request = require('supertest');
-// const app = require('../app');
-// const db = require('../config');
-
-// let token = '';
-
-// beforeAll((done) => {
-//   // Delete test user if already exists
-//   db.query('DELETE FROM users WHERE username = ?', ['testuser'], (err) => {
-//     if (err) return done(err);
-
-//     // Insert test user
-//     db.query(
-//       'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
-//       ['testuser', 'testpass', 'test@example.com'],
-//       (err2) => {
-//         if (err2) return done(err2);
-//         done();
-//       }
-//     );
-//   });
-// });
-
-
-// afterAll(() => {
-//   return new Promise((resolve) => db.end(resolve));
-// });
-
-// describe('User API', () => {
-//   it('should register a new user', async () => {
-//     const res = await request(app).post('/api/register').send({
-//       username: 'testuser',
-//       password: 'testpass'
-//     });
-//     console.log('Register response:', res.body);
-//     expect(res.statusCode).toEqual(201);
-//     expect(res.body.message).toBe('User registered');
-//   }, 10000);
-
-//   it('should login and return token', async () => {
-//     const res = await request(app).post('/api/login').send({
-//       username: 'testuser',
-//       password: 'testpass'
-//     });
-//     console.log('Login response:', res.body);
-//     expect(res.statusCode).toEqual(200);
-//     expect(res.body.token).toBeDefined();
-//     token = res.body.token;
-//   }, 10000);
-
-//   it('should fetch profile with token', async () => {
-//     const res = await request(app)
-//       .get('/api/profile')
-//       .set('Authorization', `Bearer ${token}`);
-//     console.log('Profile response:', res.body);
-//     expect(res.statusCode).toEqual(200);
-//     expect(res.body.username).toBe('testuser');
-//   }, 10000);
-
-//   it('should reject access without token', async () => {
-//     const res = await request(app).get('/api/profile');
-//     console.log('No token response:', res.body);
-//     expect(res.statusCode).toEqual(401);
-//   }, 10000);
-
-//   it('should reject wrong login', async () => {
-//     const res = await request(app).post('/api/login').send({
-//       username: 'testuser',
-//       password: 'wrongpass'
-//     });
-//     console.log('Wrong login response:', res.body);
-//     expect(res.statusCode).toEqual(401);
-//   }, 10000);
-// });
-
 const request = require('supertest');
-const app = require('../app'); // adjust path as needed
-const db = require('../config'); // adjust path as needed
-const bcrypt = require('bcrypt');
+const { app, pool, closePool } = require('../server');
+require('dotenv').config({ path: '.env.test' });
 
-const testUser = {
-  username: 'testuser',
-  email: 'test@example.com',
-  password: 'password123',
-};
-
-let token;
+let server;
 
 beforeAll(async () => {
-  const hashedPassword = await bcrypt.hash(testUser.password, 10);
-
-  await new Promise((resolve, reject) => {
-    db.query('DELETE FROM users WHERE username = ?', [testUser.username], (err) => {
-      if (err) return reject(err);
-
-      db.query(
-        'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-        [testUser.username, testUser.email, hashedPassword],
-        (err2) => (err2 ? reject(err2) : resolve())
-      );
-    });
-  });
+  try {
+    // Create test server
+    server = app.listen(0);
+    
+    // Get connection from pool
+    const connection = await pool.getConnection();
+    
+    // Make sure we're using the test database
+    await connection.query(`USE ${process.env.DB_NAME_TEST}`);
+    
+    // Clear the users table
+    await connection.query('DELETE FROM users');
+    
+    connection.release();
+  } catch (error) {
+    console.error('Setup error:', error);
+    throw error;
+  }
 });
 
-afterAll(() => {
-  db.end(); // Close MySQL connection after all tests
-});
+afterAll(async () => {
+  return new Promise(async (resolve) => {
+    try {
+      // Close the server first
+      if (server) {
+        await new Promise((resolveServer) => {
+          server.close(resolveServer);
+        });
+      }
+      
+      // Then close the pool
+      await closePool();
+      
+      // Finally resolve the outer promise
+      resolve();
+    } catch (error) {
+      console.error('Cleanup error:', error);
+      resolve(); // Still resolve to ensure tests can exit
+    }
+  });
+}, 10000); // Add timeout of 10 seconds
 
-describe('User API', () => {
-  test('should register a new user', async () => {
-    const res = await request(app).post('/api/register').send({
-      username: 'newuser',
-      email: 'new@example.com',
-      password: 'newpassword123',
-    });
+describe('User Management API Tests', () => {
+  // Test 1: Register a new user
+  test('should register a new user successfully', async () => {
+    const res = await request(server)
+      .post('/api/auth/register')
+      .send({
+        name: 'Test User',
+        email: 'test@example.com',
+        password: 'password123'
+      });
 
-    expect(res.statusCode).toBe(201);
-    expect(res.body.message).toBe('User registered successfully');
+    expect(res.status).toBe(201);
+    expect(res.body.user).toHaveProperty('id');
+    expect(res.body.user.name).toBe('Test User');
+    expect(res.body.user.email).toBe('test@example.com');
   });
 
-  test('should login and return token', async () => {
-    const res = await request(app).post('/api/login').send({
-      username: testUser.username,
-      password: testUser.password,
-    });
+  // Test 2: Login with valid credentials
+  test('should login successfully with valid credentials', async () => {
+    const res = await request(server)
+      .post('/api/auth/login')
+      .send({
+        email: 'test@example.com',
+        password: 'password123'
+      });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body.token).toBeDefined();
-
-    token = res.body.token; // Save token for later use
+    expect(res.status).toBe(200);
+    expect(res.body.message).toBe('Login successful');
+    expect(res.body.user).toHaveProperty('id');
   });
 
-  test('should fetch profile with token', async () => {
-    const res = await request(app)
-      .get('/api/profile')
-      .set('Authorization', `Bearer ${token}`);
+  // Test 3: Get all users
+  test('should get list of all users', async () => {
+    const res = await request(server)
+      .get('/api/users');
 
-    expect(res.statusCode).toBe(200);
-    expect(res.body.username).toBe(testUser.username);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
   });
 
-  test('should reject access without token', async () => {
-    const res = await request(app).get('/api/profile');
+  // Test 4: Register with invalid data
+  test('should fail to register user with missing required fields', async () => {
+    const res = await request(server)
+      .post('/api/auth/register')
+      .send({
+        name: 'Invalid User',
+        // email is missing
+        password: 'password123'
+      });
 
-    expect(res.statusCode).toBe(401); // Unauthorized
-    expect(res.body.message).toBe('No token provided');
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Name, email and password are required');
   });
 
-  test('should reject wrong login', async () => {
-    const res = await request(app).post('/api/login').send({
-      username: testUser.username,
-      password: 'wrongpassword',
-    });
+  // Test 5: Login with invalid credentials
+  test('should fail to login with wrong password', async () => {
+    const res = await request(server)
+      .post('/api/auth/login')
+      .send({
+        email: 'test@example.com',
+        password: 'wrongpassword'
+      });
 
-    expect(res.statusCode).toBe(401);
-    expect(res.body.message).toMatch(/Invalid/i);
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe('Invalid credentials');
   });
-});
-
+}); 
