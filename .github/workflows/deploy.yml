@@ -39,9 +39,9 @@ jobs:
       - name: Analyze code
         uses: github/codeql-action/analyze@v3
 
-  # === STAGE 2: Build Docker Images ===
-  build:
-    name: Build Docker Images
+  # === STAGE 2: Build & Push Docker Images ===
+  docker-build-push:
+    name: Build & Push Docker Images
     runs-on: ubuntu-latest
     needs: codeql-scan
 
@@ -71,58 +71,11 @@ jobs:
       - name: Push frontend image to ECR
         run: |
           docker push ${{ env.ECR_FRONTEND_REPO }}:latest
-  # === STAGE 3: Test Backend ===
-  # test:
-  #   name: Run Backend Tests
-  #   runs-on: ubuntu-latest
-  #   needs: build
-
-  #   services:
-  #     mysql:
-  #       image: mysql:5.7
-  #       ports:
-  #         - 3306:3306
-  #       env:
-  #         MYSQL_DATABASE: test_db
-  #         MYSQL_ALLOW_EMPTY_PASSWORD: true
-  #       options: >-
-  #         --health-cmd="mysqladmin ping --silent"
-  #         --health-interval=10s
-  #         --health-timeout=5s
-  #         --health-retries=5
-  #   steps:
-  #     - uses: actions/checkout@v3
-
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v3
-  #       with:
-  #         node-version: 18
-
-  #     - name: Install backend dependencies
-  #       working-directory: ./backend
-  #       run: npm ci
-
-  #     - name: Load MySQL schema and run tests
-  #       working-directory: ./backend
-  #       env:
-  #          DB_HOST: database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com
-  #          DB_USER: admin
-  #          DB_PASSWORD: project1234
-  #          DB_NAME: usermanagement
-  #          JWT_SECRET: supersecretkey
-  #       run: |
-  #         sudo apt-get update && sudo apt-get install -y mysql-client
-  #         echo "Loading schema..."
-  #         export MYSQL_PWD=project1234
-  #         mysql -h database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com -u admin -e "CREATE DATABASE IF NOT EXISTS test_db;"
-  #         mysql -h database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com -u admin test_db < init.sql
-  #         echo "Running tests..."
-  #         npx jest tests/user.test.js --detectOpenHandles --forceExit
-  # === STAGE 4: Deploy to EC2 ===
+  # === STAGE 3: Deploy to EC2 ===
   deploy-to-ec2:
     name: Deploy to EC2
     runs-on: ubuntu-latest
-    needs: test
+    needs: docker-build-push
 
     steps:
       - name: SSH and deploy on EC2
