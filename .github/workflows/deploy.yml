@@ -1,3 +1,158 @@
+# name: Deploy to EC2 via ECR
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# env:
+#   AWS_REGION: ${{ secrets.AWS_REGION }}
+#   EC2_HOST: ${{ secrets.EC2_HOST }}
+#   EC2_USER: ${{ secrets.EC2_USER }}
+#   EC2_KEY: ${{ secrets.EC2_KEY }}
+#   ECR_BACKEND_REPO: ${{ secrets.ECR_BACKEND_REPO }}
+#   ECR_FRONTEND_REPO: ${{ secrets.ECR_FRONTEND_REPO }}
+
+# permissions:
+#   actions: read
+#   contents: read
+#   security-events: write
+
+# jobs:
+#   # === STAGE 1: CodeQL Scan ===
+#   codeql-scan:
+#     name: CodeQL Scan
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v3
+
+#       - name: Initialize CodeQL
+#         uses: github/codeql-action/init@v3
+#         with:
+#           languages: javascript
+
+#       - name: Autobuild
+#         uses: github/codeql-action/autobuild@v3
+
+#       - name: Analyze code
+#         uses: github/codeql-action/analyze@v3
+
+#   # === STAGE 2: Build Docker Images ===
+#   build:
+#     name: Build Docker Images
+#     runs-on: ubuntu-latest
+#     needs: codeql-scan
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v3
+
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v2
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+
+#       - name: Login to Amazon ECR
+#         uses: aws-actions/amazon-ecr-login@v2
+
+#       - name: Build backend Docker image
+#         run: |
+#           docker build -t ${{ env.ECR_BACKEND_REPO }}:latest ./backend
+
+#       - name: Build frontend Docker image
+#         run: |
+#           docker build -t ${{ env.ECR_FRONTEND_REPO }}:latest ./frontend
+
+#       - name: Push backend image to ECR
+#         run: |
+#           docker push ${{ env.ECR_BACKEND_REPO }}:latest
+
+#       - name: Push frontend image to ECR
+#         run: |
+#           docker push ${{ env.ECR_FRONTEND_REPO }}:latest
+
+#   # === STAGE 3: Test Backend ===
+#   test:
+#     name: Run Backend Tests
+#     runs-on: ubuntu-latest
+#     needs: build
+
+#     services:
+#       mysql:
+#         image: mysql:5.7
+#         ports:
+#           - 5000:5000
+#         env:
+#           MYSQL_DATABASE: test_db
+#           MYSQL_ALLOW_EMPTY_PASSWORD: true
+#         options: >-
+#           --health-cmd="mysqladmin ping --silent"
+#           --health-interval=10s
+#           --health-timeout=5s
+#           --health-retries=5
+
+#     steps:
+#       - uses: actions/checkout@v3
+
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v3
+#         with:
+#           node-version: 18
+
+#       - name: Install backend dependencies
+#         working-directory: ./backend
+#         run: npm ci
+
+#       - name: Run Jest tests for user.test.js
+#         working-directory: ./backend
+#         env:
+#           DB_HOST: database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com
+#           DB_USER: admin
+#           DB_PASSWORD: project1234
+#           DB_NAME: usermanagement
+#           JWT_SECRET: supersecretkey
+#       - name: Load schema
+#         run: |
+#           echo "Creating tables..."
+#           docker run --network host -i mysql:5.7 \
+#           mysql -h127.0.0.1 -uroot test_db < backend/init.sql
+#         run: |
+#           npx jest tests/user.test.js --detectOpenHandles --forceExit
+
+#   # === STAGE 4: Deploy to EC2 ===
+#   deploy-to-ec2:
+#     name: Deploy to EC2
+#     runs-on: ubuntu-latest
+#     needs: test
+
+#     steps:
+#       - name: SSH and deploy on EC2
+#         uses: appleboy/ssh-action@v1.0.3
+#         with:
+#           host: ${{ env.EC2_HOST }}
+#           username: ${{ env.EC2_USER }}
+#           key: ${{ env.EC2_KEY }}
+#           script: |
+#             cd ~/app
+#             echo "${{ secrets.BACKEND_ENV_CONTENT }}" > .env
+
+#             aws ecr get-login-password --region ${{ env.AWS_REGION }} | docker login --username AWS --password-stdin $(echo "${{ env.ECR_BACKEND_REPO }}" | cut -d'/' -f1)
+
+#             docker pull ${{ env.ECR_BACKEND_REPO }}:latest
+#             docker pull ${{ env.ECR_FRONTEND_REPO }}:latest
+
+#             docker-compose down || true
+#             docker-compose up -d --remove-orphans
+
+#       - name: Deployment Success - Show Frontend URL
+#         run: |
+#           echo "✅ Deployment completed successfully!"
+#           echo "🌐 Frontend is live at: http://54.91.162.58:3000/"
+
 name: Deploy to EC2 via ECR
 
 on:
@@ -85,9 +240,9 @@ jobs:
       mysql:
         image: mysql:5.7
         ports:
-          - 5000:5000
+          - 3306:3306
         env:
-          MYSQL_DATABASE: usermanagement
+          MYSQL_DATABASE: test_db
           MYSQL_ALLOW_EMPTY_PASSWORD: true
         options: >-
           --health-cmd="mysqladmin ping --silent"
@@ -107,15 +262,19 @@ jobs:
         working-directory: ./backend
         run: npm ci
 
-      - name: Run Jest tests for user.test.js
+      - name: Load MySQL schema and run tests
         working-directory: ./backend
         env:
-          DB_HOST: database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com
-          DB_USER: admin
-          DB_PASSWORD: project1234
-          DB_NAME: usermanagement
-          JWT_SECRET: supersecretkey
+           DB_HOST: database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com
+           DB_USER: admin
+           DB_PASSWORD: project1234
+           DB_NAME: usermanagement
+           JWT_SECRET: supersecretkey
         run: |
+          sudo apt-get update && sudo apt-get install -y mysql-client
+          echo "Loading schema..."
+          mysql -h database-2.cy50qe2u6uhv.us-east-1.rds.amazonaws.com -uadmin test_db < init.sql
+          echo "Running tests..."
           npx jest tests/user.test.js --detectOpenHandles --forceExit
 
   # === STAGE 4: Deploy to EC2 ===
@@ -147,3 +306,4 @@ jobs:
         run: |
           echo "✅ Deployment completed successfully!"
           echo "🌐 Frontend is live at: http://54.91.162.58:3000/"
+
