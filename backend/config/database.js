@@ -11,7 +11,7 @@ const config = {
   test: {
     username: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME_TEST || 'user_management_test',
+    database: process.env.DB_NAME_TEST || 'test_db',
     host: process.env.DB_HOST,
     dialect: 'mysql'
   }
