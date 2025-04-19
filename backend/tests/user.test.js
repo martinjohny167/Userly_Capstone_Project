@@ -167,14 +167,23 @@ const db = require('../config');
 
 let token = '';
 
-beforeAll(() => {
-  return new Promise((resolve, reject) => {
-    db.query('DELETE FROM users WHERE username = ?', ['testuser'], (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
+beforeAll((done) => {
+  // Delete test user if already exists
+  db.query('DELETE FROM users WHERE username = ?', ['testuser'], (err) => {
+    if (err) return done(err);
+
+    // Insert test user
+    db.query(
+      'INSERT INTO users (username, password, email) VALUES (?, ?, ?)',
+      ['testuser', 'testpass', 'test@example.com'],
+      (err2) => {
+        if (err2) return done(err2);
+        done();
+      }
+    );
   });
 });
+
 
 afterAll(() => {
   return new Promise((resolve) => db.end(resolve));
