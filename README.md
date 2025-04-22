@@ -5,7 +5,7 @@
 This capstone project is a comprehensive DevOps implementation for deploying a full-stack user management application. It includes:
 
 - React frontend
-- Node.js + Express backend
+- Node.js + Express backend 
 - MySQL database
 - Docker containerization
 - GitHub Actions CI/CD
